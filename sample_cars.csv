@@ -1,0 +1,6 @@
+Make,Model,Year,Kilometer,Fuel Type,Transmission,Engine,Max Power,Max Torque,Length,Width,Height,Seating Capacity,Fuel Tank Capacity,Color,Owner,Price
+Toyota,Camry,2020,25000,Petrol,Automatic,2487 cc,176.8 bhp,221 Nm,4885,1840,1445,5,60,White,First,2500000
+Honda,Civic,2019,35000,Petrol,Automatic,1799 cc,139.4 bhp,174 Nm,4656,1799,1433,5,47,Black,Second,1800000
+Hyundai,Creta,2021,15000,Diesel,Manual,1493 cc,113.4 bhp,250 Nm,4300,1790,1635,5,50,Silver,First,1600000
+Maruti,Swift,2018,45000,Petrol,Manual,1197 cc,81.8 bhp,113 Nm,3845,1735,1530,5,37,Red,Third,750000
+BMW,3 Series,2020,20000,Diesel,Automatic,1995 cc,188.4 bhp,400 Nm,4709,1827,1435,5,59,Blue,First,4200000 

@@ -1,0 +1,17 @@
+Model_Key,Model_Type,Privacy_Approach,Epsilon,Privacy_Category,Noise_Type,MSE,RMSE,MAE
+Hybrid_eps_0.1,hybrid,user_level,0.1,High Privacy,gaussian,3.6742950455811564e+21,60615963619.99994,60615963581.49152
+Hybrid_eps_1.0,hybrid,user_level,1.0,Medium Privacy,laplace,1.3705587283670757e+19,3702105790.44829,3702105159.757284
+Hybrid_eps_10.0,hybrid,user_level,10.0,Medium Privacy,laplace,2.733483696679829e+17,522827284.73940885,522822819.29822683
+Hybrid_baseline,hybrid,none,inf,No Privacy,none,770410684718.5133,877730.4168812388,542579.3964939986
+Interaction_eps_0.1,interaction,user_level,0.1,High Privacy,gaussian,3.301570202467064e+21,57459291698.2716,57459291657.641785
+Interaction_eps_1.0,interaction,user_level,1.0,Medium Privacy,laplace,2.708474591354412e+17,520430071.32124984,520425585.908189
+Interaction_eps_10.0,interaction,user_level,10.0,Medium Privacy,laplace,5828416661664669.0,76344067.62587823,76313481.88581814
+Interaction_baseline,interaction,none,inf,No Privacy,none,765957346965.4713,875189.8919465828,549531.9235989314
+Linear_eps_0.1,linear,user_level,0.1,High Privacy,gaussian,4.442438032528584e+22,210770919069.2251,210770919058.14618
+Linear_eps_1.0,linear,user_level,1.0,Medium Privacy,laplace,9.957856957986068e+18,3155607224.922973,3155606485.1263576
+Linear_eps_10.0,linear,user_level,10.0,Medium Privacy,laplace,6.483328378632124e+16,254623808.3650491,254614637.74064887
+Linear_baseline,linear,none,inf,No Privacy,none,1455772979172.3428,1206554.17581323,723524.8985740774
+Quadratic_eps_0.1,quadratic,user_level,0.1,High Privacy,gaussian,7.095247536691809e+21,84233292329.64725,84233292301.937
+Quadratic_eps_1.0,quadratic,user_level,1.0,Medium Privacy,laplace,3.5512780382638305e+18,1884483493.762636,1884482255.249519
+Quadratic_eps_10.0,quadratic,user_level,10.0,Medium Privacy,laplace,4.092310799116179e+17,639711716.2532026,639708067.7580633
+Quadratic_baseline,quadratic,none,inf,No Privacy,none,2612145085164.7456,1616213.1929806618,1221828.8017552684
