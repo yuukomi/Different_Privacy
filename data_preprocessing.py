@@ -71,7 +71,7 @@ def preprocess_data(df):
     
     # Convert Year to age
     if 'Year' in df.columns:
-        current_year = 2024
+        current_year = 2025
         df['Age'] = current_year - df['Year']
     
     # Define all possible categorical and numeric columns

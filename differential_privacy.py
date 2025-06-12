@@ -1,129 +1,439 @@
 import numpy as np
-from scipy.stats import laplace
 import pandas as pd
+from linear_models import LinearRegression, QuadraticRegression, InteractionRegression, HybridRegression
 
-class DifferentialPrivacy:
-    def __init__(self, epsilon=1.0, delta=1e-5):
-        """
-        Initialize DP mechanism
-        epsilon: privacy budget
-        delta: privacy failure probability
-        """
-        self.epsilon = epsilon
-        self.delta = delta
-        self.sensitivity = None
-        self.noise_scale = None
-        
-    def compute_sensitivity(self, X):
-        """Compute L1 sensitivity for features"""
-        # For normalized data, sensitivity is roughly the max possible change
-        # when one record is removed/modified
-        ranges = np.ptp(X, axis=0)  # Range of each feature
-        self.sensitivity = np.max(ranges)
-        
-        # Scale for Laplace mechanism
-        self.noise_scale = self.sensitivity / self.epsilon
-        
-    def add_laplace_noise(self, X):
-        """Add Laplace noise to features"""
-        if self.sensitivity is None:
-            self.compute_sensitivity(X)
-            
-        noise = laplace.rvs(loc=0, scale=self.noise_scale, size=X.shape)
-        return X + noise
+class NoiseGenerator:
+    """Noise generation mechanisms for differential privacy"""
     
-    def get_privacy_spent(self, num_queries):
-        """Calculate total privacy cost using basic composition"""
-        return self.epsilon * num_queries
+    @staticmethod
+    def laplace_noise(sensitivity, epsilon, size=1):
+        """
+        Generate Laplace noise for differential privacy
+        
+        Parameters:
+        -----------
+        sensitivity : float
+            Global sensitivity of the function
+        epsilon : float  
+            Privacy parameter (smaller = more private)
+        size : int or tuple
+            Shape of noise to generate
+            
+        Returns:
+        --------
+        numpy.ndarray
+            Laplace noise
+        """
+        scale = sensitivity / epsilon
+        return np.random.laplace(0, scale, size)
+    
+    @staticmethod
+    def gaussian_noise(sensitivity, epsilon, delta=1e-5, size=1):
+        """
+        Generate Gaussian noise for differential privacy
+        Note: Only valid for epsilon < 1
+        
+        Parameters:
+        -----------
+        sensitivity : float
+            Global sensitivity of the function
+        epsilon : float
+            Privacy parameter (must be < 1)
+        delta : float
+            Privacy parameter for (ε,δ)-DP
+        size : int or tuple
+            Shape of noise to generate
+            
+        Returns:
+        --------
+        numpy.ndarray
+            Gaussian noise
+        """
+        if epsilon >= 1:
+            raise ValueError("Gaussian mechanism only valid for epsilon < 1")
+        
+        # Calculate sigma for (ε,δ)-DP
+        sigma = sensitivity * np.sqrt(2 * np.log(1.25 / delta)) / epsilon
+        return np.random.normal(0, sigma, size)
 
-class PrivateDataLoader:
-    def __init__(self, X, y, epsilon=1.0, test_size=0.2):
-        self.X = X
-        self.y = y
-        self.epsilon = epsilon
-        self.test_size = test_size
-        self.dp = DifferentialPrivacy(epsilon=epsilon)
+
+class PrivacyAccountant:
+    """Privacy accounting for composition of DP mechanisms"""
+    
+    def __init__(self):
+        self.privacy_spent = []
+        self.total_epsilon = 0.0
+        self.total_delta = 0.0
+    
+    def add_privacy_cost(self, epsilon, delta=0.0, description=""):
+        """Add privacy cost from a single mechanism"""
+        self.privacy_spent.append({
+            'epsilon': epsilon,
+            'delta': delta, 
+            'description': description
+        })
+        self.total_epsilon += epsilon
+        self.total_delta += delta
+    
+    def basic_composition(self):
+        """Basic composition theorem: sum of epsilons and deltas"""
+        return self.total_epsilon, self.total_delta
+    
+    def advanced_composition(self, k=None):
+        """
+        Advanced composition theorem for better bounds
         
-    def normalize_features(self, X):
-        """Normalize features to [0,1] range"""
-        X_norm = (X - X.min()) / (X.max() - X.min())
-        return X_norm
+        Parameters:
+        -----------
+        k : int
+            Number of mechanisms (if None, use actual count)
+            
+        Returns:
+        --------
+        tuple
+            (epsilon, delta) under advanced composition
+        """
+        if k is None:
+            k = len(self.privacy_spent)
         
-    def create_private_data(self):
-        """Create differentially private version of the dataset"""
-        # Normalize features
-        X_norm = self.normalize_features(self.X)
+        if k == 0:
+            return 0.0, 0.0
+        
+        # For simplicity, assume all mechanisms have same epsilon
+        avg_epsilon = self.total_epsilon / k if k > 0 else 0
+        avg_delta = self.total_delta / k if k > 0 else 0
+        
+        # Advanced composition: ε' = √(2k ln(1/δ')) * ε + k * ε * (e^ε - 1)
+        # Simplified version for small epsilon
+        delta_prime = min(avg_delta, 1e-5)
+        epsilon_prime = np.sqrt(2 * k * np.log(1/delta_prime)) * avg_epsilon + k * avg_epsilon * (np.exp(avg_epsilon) - 1)
+        
+        return epsilon_prime, self.total_delta
+    
+    def get_privacy_report(self):
+        """Generate privacy accounting report"""
+        basic_eps, basic_delta = self.basic_composition()
+        advanced_eps, advanced_delta = self.advanced_composition()
+        
+        report = f"""
+Privacy Accounting Report:
+=========================
+Total mechanisms used: {len(self.privacy_spent)}
+
+Basic Composition:
+- Total ε: {basic_eps:.6f}
+- Total δ: {basic_delta:.6f}
+
+Advanced Composition:
+- Total ε: {advanced_eps:.6f}  
+- Total δ: {advanced_delta:.6f}
+
+Individual mechanisms:
+"""
+        for i, cost in enumerate(self.privacy_spent):
+            report += f"  {i+1}. {cost['description']}: ε={cost['epsilon']:.6f}, δ={cost['delta']:.6f}\n"
+        
+        return report
+
+
+class PrivacyPreservingRegression:
+    """Differential Privacy for Linear Regression"""
+    
+    def __init__(self, model_type="linear", privacy_approach="user_level"):
+        """
+        Parameters:
+        -----------
+        model_type : str
+            Type of regression model ('linear', 'quadratic', 'interaction', 'hybrid')
+        privacy_approach : str
+            'user_level' or 'server_level'
+        """
+        self.model_type = model_type
+        self.privacy_approach = privacy_approach
+        self.model = None
+        self.accountant = PrivacyAccountant()
+        self.noise_generator = NoiseGenerator()
+        
+        # Initialize model
+        models = {
+            "linear": LinearRegression(),
+            "quadratic": QuadraticRegression(), 
+            "interaction": InteractionRegression(),
+            "hybrid": HybridRegression()
+        }
+        
+        if model_type not in models:
+            raise ValueError(f"Invalid model type: {model_type}")
+        
+        self.model = models[model_type]
+    
+    def _calculate_sensitivity(self, X, y, data_bounds=None):
+        """
+        Calculate sensitivity for regression coefficients
+        Simplified calculation - in practice this requires careful analysis
+        """
+        if data_bounds is None:
+            # Estimate bounds from data
+            x_max = np.max(np.abs(X), axis=0)
+            y_max = np.max(np.abs(y))
+            data_bounds = {'x_max': x_max, 'y_max': y_max}
+        
+        # Simplified sensitivity calculation
+        # For linear regression, sensitivity depends on data bounds and regularization
+        sensitivity = np.sum(data_bounds['x_max']) * data_bounds['y_max'] / len(X)
+        
+        return sensitivity
+    
+    def fit_with_user_level_dp(self, X, y, epsilon, noise_type="laplace", data_bounds=None):
+        """
+        User-level DP: Add noise to data before training
+        
+        Parameters:
+        -----------
+        X : array-like
+            Feature matrix
+        y : array-like  
+            Target vector
+        epsilon : float
+            Privacy parameter
+        noise_type : str
+            'laplace' or 'gaussian'
+        data_bounds : dict
+            Bounds on data values for sensitivity calculation
+        """
+        X = np.array(X)
+        y = np.array(y)
+        
+        # Calculate sensitivity
+        sensitivity = self._calculate_sensitivity(X, y, data_bounds)
         
         # Add noise to features
-        X_private = self.dp.add_laplace_noise(X_norm)
+        if noise_type == "laplace":
+            X_noisy = X + self.noise_generator.laplace_noise(
+                sensitivity, epsilon/2, X.shape
+            )
+            y_noisy = y + self.noise_generator.laplace_noise(
+                sensitivity, epsilon/2, y.shape
+            )
+        elif noise_type == "gaussian" and epsilon < 1:
+            X_noisy = X + self.noise_generator.gaussian_noise(
+                sensitivity, epsilon/2, size=X.shape
+            )
+            y_noisy = y + self.noise_generator.gaussian_noise(
+                sensitivity, epsilon/2, size=y.shape
+            )
+        else:
+            raise ValueError("Invalid noise type or epsilon >= 1 for Gaussian")
         
-        # Convert back to DataFrame
-        X_private = pd.DataFrame(X_private, columns=self.X.columns)
+        # Train model on noisy data
+        self.model.fit(X_noisy, y_noisy)
         
-        return X_private, self.y
+        # Record privacy cost
+        self.accountant.add_privacy_cost(
+            epsilon, 0.0 if noise_type == "laplace" else 1e-5,
+            f"User-level DP training with {noise_type} noise"
+        )
+        
+        return self
     
-    def get_train_test_split(self):
-        """Get private train/test split"""
-        # Create private version of data
-        X_private, y = self.create_private_data()
+    def predict_with_server_level_dp(self, X, epsilon, noise_type="laplace"):
+        """
+        Server-level DP: Add noise to predictions
         
-        # Calculate split index
-        split_idx = int(len(X_private) * (1 - self.test_size))
+        Parameters:
+        -----------
+        X : array-like
+            Feature matrix for prediction
+        epsilon : float
+            Privacy parameter for this query
+        noise_type : str
+            'laplace' or 'gaussian'
+            
+        Returns:
+        --------
+        numpy.ndarray
+            Noisy predictions
+        """
+        if self.model.coefficients is None:
+            raise ValueError("Model must be fitted first")
         
-        # Split data
-        X_train = X_private[:split_idx]
-        X_test = X_private[split_idx:]
-        y_train = y[:split_idx]
-        y_test = y[split_idx:]
+        # Get clean predictions
+        clean_predictions = self.model.predict(X)
         
-        return X_train, X_test, y_train, y_test
+        # Estimate sensitivity for predictions (simplified)
+        prediction_range = np.max(clean_predictions) - np.min(clean_predictions)
+        sensitivity = prediction_range / len(X)  # Simplified
+        
+        # Add noise to predictions
+        if noise_type == "laplace":
+            noise = self.noise_generator.laplace_noise(
+                sensitivity, epsilon, clean_predictions.shape
+            )
+        elif noise_type == "gaussian" and epsilon < 1:
+            noise = self.noise_generator.gaussian_noise(
+                sensitivity, epsilon, size=clean_predictions.shape
+            )
+        else:
+            raise ValueError("Invalid noise type or epsilon >= 1 for Gaussian")
+        
+        noisy_predictions = clean_predictions + noise
+        
+        # Record privacy cost
+        self.accountant.add_privacy_cost(
+            epsilon, 0.0 if noise_type == "laplace" else 1e-5,
+            f"Server-level DP prediction with {noise_type} noise"
+        )
+        
+        return noisy_predictions
+    
+    def fit(self, X, y, epsilon, **kwargs):
+        """Fit model with chosen privacy approach"""
+        if self.privacy_approach == "user_level":
+            return self.fit_with_user_level_dp(X, y, epsilon, **kwargs)
+        else:
+            # For server-level, train normally first
+            self.model.fit(X, y)
+            return self
+    
+    def predict(self, X, epsilon=None, **kwargs):
+        """Make predictions with chosen privacy approach"""
+        if self.privacy_approach == "server_level" and epsilon is not None:
+            return self.predict_with_server_level_dp(X, epsilon, **kwargs)
+        else:
+            return self.model.predict(X)
+    
+    def get_privacy_report(self):
+        """Get privacy accounting report"""
+        return self.accountant.get_privacy_report()
 
-def evaluate_privacy_impact(epsilons=[0.1, 1.0, 10.0]):
-    """Evaluate model performance with different privacy levels"""
-    from data_preprocessing import load_and_preprocess
-    from linear_models import LinearRegression, evaluate_model
+
+def analyze_privacy_utility_tradeoff(X_train, y_train, X_test, y_test, 
+                                   epsilon_values, model_type="linear",
+                                   privacy_approach="user_level"):
+    """
+    Analyze privacy-utility tradeoff across different epsilon values
     
-    # Load original data
-    X_train, y_train, X_test, y_test, _ = load_and_preprocess()
-    
-    # Store results
+    Parameters:
+    -----------
+    X_train, y_train : array-like
+        Training data
+    X_test, y_test : array-like  
+        Test data
+    epsilon_values : list
+        List of epsilon values to test
+    model_type : str
+        Type of regression model
+    privacy_approach : str
+        'user_level' or 'server_level'
+        
+    Returns:
+    --------
+    dict
+        Results for each epsilon value
+    """
     results = {}
     
-    # Baseline without privacy
-    print("\nBaseline (No Privacy):")
-    model = LinearRegression()
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
-    results['baseline'] = evaluate_model(y_test, y_pred, "Baseline")
+    print(f"\nAnalyzing Privacy-Utility Tradeoff")
+    print(f"Model: {model_type}, Approach: {privacy_approach}")
+    print("=" * 50)
     
-    # Test different privacy levels
-    for epsilon in epsilons:
-        print(f"\nTesting with epsilon = {epsilon}")
+    for eps in epsilon_values:
+        print(f"\nTesting ε = {eps}")
         
-        # Create private data loader
-        private_data = PrivateDataLoader(X_train, y_train, epsilon=epsilon)
-        X_train_private, X_test_private, y_train, y_test = private_data.get_train_test_split()
+        # Categorize epsilon
+        if eps < 1:
+            category = "High Privacy (ε < 1)"
+            noise_type = "gaussian"
+        elif 1 <= eps <= 10:
+            category = "Medium Privacy (1 ≤ ε ≤ 10)"
+            noise_type = "laplace"
+        else:
+            category = "Low Privacy (ε > 10)"
+            noise_type = "laplace"
         
-        # Train and evaluate model
-        model = LinearRegression()
-        model.fit(X_train_private, y_train)
-        y_pred = model.predict(X_test_private)
+        print(f"Category: {category}")
         
-        results[f'epsilon_{epsilon}'] = evaluate_model(y_test, y_pred, f"DP (ε={epsilon})")
+        # Create DP model
+        dp_model = PrivacyPreservingRegression(
+            model_type=model_type,
+            privacy_approach=privacy_approach
+        )
         
-        # Calculate privacy spent
-        privacy_spent = private_data.dp.get_privacy_spent(num_queries=len(X_train.columns))
-        print(f"Total privacy budget spent: {privacy_spent:.2f}")
+        try:
+            # Fit model
+            if privacy_approach == "user_level":
+                dp_model.fit(X_train, y_train, eps, noise_type=noise_type)
+                y_pred = dp_model.predict(X_test)
+            else:
+                dp_model.fit(X_train, y_train, eps)
+                y_pred = dp_model.predict(X_test, eps, noise_type=noise_type)
+            
+            # Calculate metrics
+            mse = np.mean((y_test - y_pred) ** 2)
+            mae = np.mean(np.abs(y_test - y_pred))
+            
+            results[eps] = {
+                'category': category,
+                'noise_type': noise_type,
+                'mse': mse,
+                'mae': mae,
+                'privacy_report': dp_model.get_privacy_report()
+            }
+            
+            print(f"MSE: {mse:.2f}")
+            print(f"MAE: {mae:.2f}")
+            print(f"Noise type: {noise_type}")
+            
+        except Exception as e:
+            print(f"Error with ε={eps}: {str(e)}")
+            results[eps] = {'error': str(e)}
     
     return results
 
+
 if __name__ == "__main__":
-    # Test privacy mechanisms
-    results = evaluate_privacy_impact()
+    # Test with synthetic data
+    np.random.seed(42)
+    n_samples = 200
+    n_features = 4
     
-    # Print summary
-    print("\nPrivacy Impact Summary:")
-    for model_name, metrics in results.items():
-        print(f"\n{model_name}:")
-        print(f"RMSE: {metrics[1]:.2f}")
-        print(f"MAE: {metrics[2]:.2f}") 
+    X = np.random.randn(n_samples, n_features)
+    y = 2*X[:, 0] + 3*X[:, 1] + np.random.randn(n_samples)*0.5
+    
+    # Split data
+    split = int(0.8 * n_samples)
+    X_train, X_test = X[:split], X[split:]
+    y_train, y_test = y[:split], y[split:]
+    
+    print("Testing Differential Privacy for Regression")
+    print("=" * 50)
+    
+    # Test epsilon values
+    epsilon_values = [0.1, 0.5, 1.0, 5.0, 10.0, 15.0]
+    
+    # Test user-level DP
+    print("\n1. USER-LEVEL DIFFERENTIAL PRIVACY")
+    user_results = analyze_privacy_utility_tradeoff(
+        X_train, y_train, X_test, y_test,
+        epsilon_values, "linear", "user_level"
+    )
+    
+    # Test server-level DP  
+    print("\n\n2. SERVER-LEVEL DIFFERENTIAL PRIVACY")
+    server_results = analyze_privacy_utility_tradeoff(
+        X_train, y_train, X_test, y_test,
+        epsilon_values, "linear", "server_level"
+    )
+    
+    # Summary
+    print("\n\nSUMMARY")
+    print("=" * 50)
+    print("User-level DP Results:")
+    for eps, result in user_results.items():
+        if 'mse' in result:
+            print(f"  ε={eps}: MSE={result['mse']:.2f}, Category={result['category']}")
+    
+    print("\nServer-level DP Results:")
+    for eps, result in server_results.items():
+        if 'mse' in result:
+            print(f"  ε={eps}: MSE={result['mse']:.2f}, Category={result['category']}")
