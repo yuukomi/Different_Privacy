@@ -5,6 +5,25 @@ from linear_models import LinearRegression, QuadraticRegression, InteractionRegr
 class NoiseGenerator:
     """Noise generation mechanisms for differential privacy"""
     
+    # Minimum epsilon threshold to prevent division by zero or extremely large noise
+    MIN_EPSILON = 1e-8
+    
+    @staticmethod
+    def _validate_epsilon(epsilon):
+        """Validate epsilon parameter"""
+        if epsilon <= 0:
+            raise ValueError(f"Epsilon must be positive, got {epsilon}")
+        if epsilon < NoiseGenerator.MIN_EPSILON:
+            raise ValueError(f"Epsilon too small (< {NoiseGenerator.MIN_EPSILON}), would cause numerical instability")
+        return True
+    
+    @staticmethod
+    def _validate_sensitivity(sensitivity):
+        """Validate sensitivity parameter"""
+        if sensitivity <= 0:
+            raise ValueError(f"Sensitivity must be positive, got {sensitivity}")
+        return True
+    
     @staticmethod
     def laplace_noise(sensitivity, epsilon, size=1):
         """
@@ -13,9 +32,9 @@ class NoiseGenerator:
         Parameters:
         -----------
         sensitivity : float
-            Global sensitivity of the function
+            Global sensitivity of the function (must be > 0)
         epsilon : float  
-            Privacy parameter (smaller = more private)
+            Privacy parameter (must be > 0, smaller = more private)
         size : int or tuple
             Shape of noise to generate
             
@@ -23,8 +42,21 @@ class NoiseGenerator:
         --------
         numpy.ndarray
             Laplace noise
+            
+        Raises:
+        --------
+        ValueError
+            If epsilon <= 0 or sensitivity <= 0
         """
+        NoiseGenerator._validate_epsilon(epsilon)
+        NoiseGenerator._validate_sensitivity(sensitivity)
+        
         scale = sensitivity / epsilon
+        
+        # Additional check for numerical stability
+        if scale > 1e6:
+            raise ValueError(f"Noise scale too large ({scale:.2e}), consider increasing epsilon")
+        
         return np.random.laplace(0, scale, size)
     
     @staticmethod
@@ -36,11 +68,11 @@ class NoiseGenerator:
         Parameters:
         -----------
         sensitivity : float
-            Global sensitivity of the function
+            Global sensitivity of the function (must be > 0)
         epsilon : float
-            Privacy parameter (must be < 1)
+            Privacy parameter (must be > 0 and < 1)
         delta : float
-            Privacy parameter for (ε,δ)-DP
+            Privacy parameter for (ε,δ)-DP (must be > 0)
         size : int or tuple
             Shape of noise to generate
             
@@ -48,12 +80,39 @@ class NoiseGenerator:
         --------
         numpy.ndarray
             Gaussian noise
+            
+        Raises:
+        --------
+        ValueError
+            If epsilon <= 0, epsilon >= 1, sensitivity <= 0, or delta <= 0
         """
+        NoiseGenerator._validate_epsilon(epsilon)
+        NoiseGenerator._validate_sensitivity(sensitivity)
+        
         if epsilon >= 1:
-            raise ValueError("Gaussian mechanism only valid for epsilon < 1")
+            raise ValueError(f"Gaussian mechanism only valid for epsilon < 1, got {epsilon}")
+        
+        if delta <= 0:
+            raise ValueError(f"Delta must be positive, got {delta}")
+        
+        if delta >= 1:
+            raise ValueError(f"Delta must be < 1, got {delta}")
         
         # Calculate sigma for (ε,δ)-DP
-        sigma = sensitivity * np.sqrt(2 * np.log(1.25 / delta)) / epsilon
+        try:
+            log_term = np.log(1.25 / delta)
+            if log_term <= 0:
+                raise ValueError(f"Invalid delta value {delta}, log(1.25/delta) must be positive")
+            
+            sigma = sensitivity * np.sqrt(2 * log_term) / epsilon
+            
+            # Additional check for numerical stability
+            if sigma > 1e6:
+                raise ValueError(f"Noise sigma too large ({sigma:.2e}), consider increasing epsilon or decreasing sensitivity")
+                
+        except (ValueError, OverflowError) as e:
+            raise ValueError(f"Error calculating Gaussian noise parameters: {str(e)}")
+        
         return np.random.normal(0, sigma, size)
 
 
@@ -67,6 +126,11 @@ class PrivacyAccountant:
     
     def add_privacy_cost(self, epsilon, delta=0.0, description=""):
         """Add privacy cost from a single mechanism"""
+        if epsilon <= 0:
+            raise ValueError(f"Epsilon must be positive, got {epsilon}")
+        if delta < 0:
+            raise ValueError(f"Delta must be non-negative, got {delta}")
+            
         self.privacy_spent.append({
             'epsilon': epsilon,
             'delta': delta, 
@@ -103,10 +167,21 @@ class PrivacyAccountant:
         avg_epsilon = self.total_epsilon / k if k > 0 else 0
         avg_delta = self.total_delta / k if k > 0 else 0
         
+        if avg_epsilon <= 0:
+            return 0.0, self.total_delta
+        
         # Advanced composition: ε' = √(2k ln(1/δ')) * ε + k * ε * (e^ε - 1)
         # Simplified version for small epsilon
-        delta_prime = min(avg_delta, 1e-5)
-        epsilon_prime = np.sqrt(2 * k * np.log(1/delta_prime)) * avg_epsilon + k * avg_epsilon * (np.exp(avg_epsilon) - 1)
+        delta_prime = max(avg_delta, 1e-10)  # Ensure delta_prime > 0
+        
+        try:
+            log_term = np.log(1/delta_prime)
+            sqrt_term = np.sqrt(2 * k * log_term) * avg_epsilon
+            exp_term = k * avg_epsilon * (np.exp(avg_epsilon) - 1)
+            epsilon_prime = sqrt_term + exp_term
+        except (ValueError, OverflowError):
+            # Fallback to basic composition if advanced fails
+            epsilon_prime = self.total_epsilon
         
         return epsilon_prime, self.total_delta
     
@@ -180,7 +255,21 @@ class PrivacyPreservingRegression:
         
         # Simplified sensitivity calculation
         # For linear regression, sensitivity depends on data bounds and regularization
-        sensitivity = np.sum(data_bounds['x_max']) * data_bounds['y_max'] / len(X)
+        x_max_sum = np.sum(data_bounds['x_max'])
+        y_max = data_bounds['y_max']
+        n = len(X)
+        
+        if n == 0:
+            raise ValueError("Cannot calculate sensitivity for empty dataset")
+        
+        sensitivity = (x_max_sum * y_max) / n
+        
+        # Ensure sensitivity is positive and reasonable
+        if sensitivity <= 0:
+            sensitivity = 1.0  # Default fallback
+        
+        # Cap sensitivity to prevent extremely large noise
+        sensitivity = min(sensitivity, 1000.0)
         
         return sensitivity
     
@@ -195,42 +284,70 @@ class PrivacyPreservingRegression:
         y : array-like  
             Target vector
         epsilon : float
-            Privacy parameter
+            Privacy parameter (must be > 0)
         noise_type : str
             'laplace' or 'gaussian'
         data_bounds : dict
             Bounds on data values for sensitivity calculation
+            
+        Raises:
+        --------
+        ValueError
+            If epsilon <= 0 or other invalid parameters
         """
+        # Validate epsilon early
+        if epsilon <= 0:
+            raise ValueError(f"Epsilon must be positive, got {epsilon}")
+        
         X = np.array(X)
         y = np.array(y)
         
+        if len(X) == 0 or len(y) == 0:
+            raise ValueError("Cannot fit model on empty dataset")
+        
         # Calculate sensitivity
-        sensitivity = self._calculate_sensitivity(X, y, data_bounds)
+        try:
+            sensitivity = self._calculate_sensitivity(X, y, data_bounds)
+        except Exception as e:
+            raise ValueError(f"Error calculating sensitivity: {str(e)}")
+        
+        # Split epsilon budget between features and targets
+        eps_x = epsilon / 2
+        eps_y = epsilon / 2
         
         # Add noise to features
-        if noise_type == "laplace":
-            X_noisy = X + self.noise_generator.laplace_noise(
-                sensitivity, epsilon/2, X.shape
-            )
-            y_noisy = y + self.noise_generator.laplace_noise(
-                sensitivity, epsilon/2, y.shape
-            )
-        elif noise_type == "gaussian" and epsilon < 1:
-            X_noisy = X + self.noise_generator.gaussian_noise(
-                sensitivity, epsilon/2, size=X.shape
-            )
-            y_noisy = y + self.noise_generator.gaussian_noise(
-                sensitivity, epsilon/2, size=y.shape
-            )
-        else:
-            raise ValueError("Invalid noise type or epsilon >= 1 for Gaussian")
+        try:
+            if noise_type == "laplace":
+                X_noisy = X + self.noise_generator.laplace_noise(
+                    sensitivity, eps_x, X.shape
+                )
+                y_noisy = y + self.noise_generator.laplace_noise(
+                    sensitivity, eps_y, y.shape
+                )
+            elif noise_type == "gaussian":
+                if epsilon >= 1:
+                    raise ValueError(f"Gaussian mechanism requires epsilon < 1, got {epsilon}")
+                X_noisy = X + self.noise_generator.gaussian_noise(
+                    sensitivity, eps_x, size=X.shape
+                )
+                y_noisy = y + self.noise_generator.gaussian_noise(
+                    sensitivity, eps_y, size=y.shape
+                )
+            else:
+                raise ValueError(f"Invalid noise type: {noise_type}. Must be 'laplace' or 'gaussian'")
+        except Exception as e:
+            raise ValueError(f"Error generating noise: {str(e)}")
         
         # Train model on noisy data
-        self.model.fit(X_noisy, y_noisy)
+        try:
+            self.model.fit(X_noisy, y_noisy)
+        except Exception as e:
+            raise ValueError(f"Error fitting model: {str(e)}")
         
         # Record privacy cost
+        delta_val = 0.0 if noise_type == "laplace" else 1e-5
         self.accountant.add_privacy_cost(
-            epsilon, 0.0 if noise_type == "laplace" else 1e-5,
+            epsilon, delta_val,
             f"User-level DP training with {noise_type} noise"
         )
         
@@ -245,7 +362,7 @@ class PrivacyPreservingRegression:
         X : array-like
             Feature matrix for prediction
         epsilon : float
-            Privacy parameter for this query
+            Privacy parameter for this query (must be > 0)
         noise_type : str
             'laplace' or 'gaussian'
             
@@ -253,34 +370,63 @@ class PrivacyPreservingRegression:
         --------
         numpy.ndarray
             Noisy predictions
+            
+        Raises:
+        --------
+        ValueError
+            If model not fitted or epsilon <= 0
         """
         if self.model.coefficients is None:
             raise ValueError("Model must be fitted first")
         
+        if epsilon <= 0:
+            raise ValueError(f"Epsilon must be positive, got {epsilon}")
+        
+        X = np.array(X)
+        if len(X) == 0:
+            raise ValueError("Cannot predict on empty dataset")
+        
         # Get clean predictions
-        clean_predictions = self.model.predict(X)
+        try:
+            clean_predictions = self.model.predict(X)
+        except Exception as e:
+            raise ValueError(f"Error making predictions: {str(e)}")
         
         # Estimate sensitivity for predictions (simplified)
+        if len(clean_predictions) == 0:
+            return clean_predictions
+        
         prediction_range = np.max(clean_predictions) - np.min(clean_predictions)
+        if prediction_range <= 0:
+            prediction_range = 1.0  # Default if all predictions are the same
+        
         sensitivity = prediction_range / len(X)  # Simplified
+        sensitivity = max(sensitivity, 0.01)  # Minimum sensitivity
+        sensitivity = min(sensitivity, 100.0)  # Maximum sensitivity
         
         # Add noise to predictions
-        if noise_type == "laplace":
-            noise = self.noise_generator.laplace_noise(
-                sensitivity, epsilon, clean_predictions.shape
-            )
-        elif noise_type == "gaussian" and epsilon < 1:
-            noise = self.noise_generator.gaussian_noise(
-                sensitivity, epsilon, size=clean_predictions.shape
-            )
-        else:
-            raise ValueError("Invalid noise type or epsilon >= 1 for Gaussian")
+        try:
+            if noise_type == "laplace":
+                noise = self.noise_generator.laplace_noise(
+                    sensitivity, epsilon, clean_predictions.shape
+                )
+            elif noise_type == "gaussian":
+                if epsilon >= 1:
+                    raise ValueError(f"Gaussian mechanism requires epsilon < 1, got {epsilon}")
+                noise = self.noise_generator.gaussian_noise(
+                    sensitivity, epsilon, size=clean_predictions.shape
+                )
+            else:
+                raise ValueError(f"Invalid noise type: {noise_type}. Must be 'laplace' or 'gaussian'")
+        except Exception as e:
+            raise ValueError(f"Error generating prediction noise: {str(e)}")
         
         noisy_predictions = clean_predictions + noise
         
         # Record privacy cost
+        delta_val = 0.0 if noise_type == "laplace" else 1e-5
         self.accountant.add_privacy_cost(
-            epsilon, 0.0 if noise_type == "laplace" else 1e-5,
+            epsilon, delta_val,
             f"Server-level DP prediction with {noise_type} noise"
         )
         
@@ -288,11 +434,17 @@ class PrivacyPreservingRegression:
     
     def fit(self, X, y, epsilon, **kwargs):
         """Fit model with chosen privacy approach"""
+        if epsilon <= 0:
+            raise ValueError(f"Epsilon must be positive, got {epsilon}")
+            
         if self.privacy_approach == "user_level":
             return self.fit_with_user_level_dp(X, y, epsilon, **kwargs)
         else:
             # For server-level, train normally first
-            self.model.fit(X, y)
+            try:
+                self.model.fit(X, y)
+            except Exception as e:
+                raise ValueError(f"Error fitting model: {str(e)}")
             return self
     
     def predict(self, X, epsilon=None, **kwargs):
@@ -320,7 +472,7 @@ def analyze_privacy_utility_tradeoff(X_train, y_train, X_test, y_test,
     X_test, y_test : array-like  
         Test data
     epsilon_values : list
-        List of epsilon values to test
+        List of epsilon values to test (must all be > 0)
     model_type : str
         Type of regression model
     privacy_approach : str
@@ -333,11 +485,25 @@ def analyze_privacy_utility_tradeoff(X_train, y_train, X_test, y_test,
     """
     results = {}
     
+    # Validate epsilon values
+    valid_epsilon_values = []
+    for eps in epsilon_values:
+        if eps <= 0:
+            print(f"Warning: Skipping invalid epsilon value {eps} (must be > 0)")
+            continue
+        if eps < NoiseGenerator.MIN_EPSILON:
+            print(f"Warning: Skipping epsilon value {eps} (too small, minimum is {NoiseGenerator.MIN_EPSILON})")
+            continue
+        valid_epsilon_values.append(eps)
+    
+    if not valid_epsilon_values:
+        raise ValueError("No valid epsilon values provided")
+    
     print(f"\nAnalyzing Privacy-Utility Tradeoff")
     print(f"Model: {model_type}, Approach: {privacy_approach}")
     print("=" * 50)
     
-    for eps in epsilon_values:
+    for eps in valid_epsilon_values:
         print(f"\nTesting ε = {eps}")
         
         # Categorize epsilon
@@ -354,10 +520,15 @@ def analyze_privacy_utility_tradeoff(X_train, y_train, X_test, y_test,
         print(f"Category: {category}")
         
         # Create DP model
-        dp_model = PrivacyPreservingRegression(
-            model_type=model_type,
-            privacy_approach=privacy_approach
-        )
+        try:
+            dp_model = PrivacyPreservingRegression(
+                model_type=model_type,
+                privacy_approach=privacy_approach
+            )
+        except Exception as e:
+            print(f"Error creating model: {str(e)}")
+            results[eps] = {'error': f"Model creation error: {str(e)}"}
+            continue
         
         try:
             # Fit model
@@ -408,32 +579,41 @@ if __name__ == "__main__":
     print("Testing Differential Privacy for Regression")
     print("=" * 50)
     
-    # Test epsilon values
+    # Test epsilon values (removed 0 and very small values)
     epsilon_values = [0.1, 0.5, 1.0, 5.0, 10.0, 15.0]
     
-    # Test user-level DP
-    print("\n1. USER-LEVEL DIFFERENTIAL PRIVACY")
-    user_results = analyze_privacy_utility_tradeoff(
-        X_train, y_train, X_test, y_test,
-        epsilon_values, "linear", "user_level"
-    )
-    
-    # Test server-level DP  
-    print("\n\n2. SERVER-LEVEL DIFFERENTIAL PRIVACY")
-    server_results = analyze_privacy_utility_tradeoff(
-        X_train, y_train, X_test, y_test,
-        epsilon_values, "linear", "server_level"
-    )
-    
-    # Summary
-    print("\n\nSUMMARY")
-    print("=" * 50)
-    print("User-level DP Results:")
-    for eps, result in user_results.items():
-        if 'mse' in result:
-            print(f"  ε={eps}: MSE={result['mse']:.2f}, Category={result['category']}")
-    
-    print("\nServer-level DP Results:")
-    for eps, result in server_results.items():
-        if 'mse' in result:
-            print(f"  ε={eps}: MSE={result['mse']:.2f}, Category={result['category']}")
+    try:
+        # Test user-level DP
+        print("\n1. USER-LEVEL DIFFERENTIAL PRIVACY")
+        user_results = analyze_privacy_utility_tradeoff(
+            X_train, y_train, X_test, y_test,
+            epsilon_values, "linear", "user_level"
+        )
+        
+        # Test server-level DP  
+        print("\n\n2. SERVER-LEVEL DIFFERENTIAL PRIVACY")
+        server_results = analyze_privacy_utility_tradeoff(
+            X_train, y_train, X_test, y_test,
+            epsilon_values, "linear", "server_level"
+        )
+        
+        # Summary
+        print("\n\nSUMMARY")
+        print("=" * 50)
+        print("User-level DP Results:")
+        for eps, result in user_results.items():
+            if 'mse' in result:
+                print(f"  ε={eps}: MSE={result['mse']:.2f}, Category={result['category']}")
+            elif 'error' in result:
+                print(f"  ε={eps}: ERROR - {result['error']}")
+        
+        print("\nServer-level DP Results:")
+        for eps, result in server_results.items():
+            if 'mse' in result:
+                print(f"  ε={eps}: MSE={result['mse']:.2f}, Category={result['category']}")
+            elif 'error' in result:
+                print(f"  ε={eps}: ERROR - {result['error']}")
+                
+    except Exception as e:
+        print(f"Fatal error: {str(e)}")
+        print("Please check your input parameters and try again.")
