@@ -1,7 +1,6 @@
 import numpy as np
 import pandas as pd
 
-# Evaluation metrics từ code 1
 def mean_squared_error(y_true, y_pred):
     """Calculate mean squared error"""
     return np.mean((y_true - y_pred) ** 2)
@@ -34,14 +33,9 @@ class LinearRegression:
         self.alpha = alpha  # regularization strength
         
     def fit(self, X, y):
-        """
-        Fit linear regression model using normal equation with optional regularization
-        """
-        # Convert to numpy arrays
         X = np.array(X)
         y = np.array(y)
-        
-        # Store feature names if available
+    
         if hasattr(X, 'columns'):
             self.feature_names = X.columns.tolist()
         elif isinstance(X, pd.DataFrame):
@@ -390,7 +384,7 @@ def compare_models(X_train, y_train, X_test=None, y_test=None, regularization=No
             'train_mae': train_mae
         }
         
-        # Test predictions if test data provided
+
         if X_test is not None and y_test is not None:
             y_test_pred = model.predict(X_test)
             test_mse, test_rmse, test_mae = evaluate_model(y_test, y_test_pred, f"{name} (Testing)")
@@ -409,11 +403,11 @@ def load_and_evaluate_from_csv(csv_path, trained_models, target_column='Price'):
     Cải tiến từ yêu cầu đề bài
     """
     try:
-        # Load data
+
         data = pd.read_csv(csv_path)
         print(f"Loaded {len(data)} samples from {csv_path}")
         
-        # Separate features and target
+
         if target_column in data.columns:
             X = data.drop(columns=[target_column])
             y = data[target_column]
@@ -440,33 +434,21 @@ def load_and_evaluate_from_csv(csv_path, trained_models, target_column='Price'):
         return None
 
 if __name__ == "__main__":
-    # Test with sample data
     np.random.seed(42)
     n_samples = 100
     n_features = 4
-    
-    # Create sample data with feature names
     feature_names = ['Age', 'Engine', 'Max Power', 'Kilometer']
     X = pd.DataFrame(np.random.randn(n_samples, n_features), columns=feature_names)
-    
-    # Create synthetic target with known relationship
     y = (2*X['Age'] + 3*X['Engine']**2 + X['Age']*X['Engine'] + 
          0.5*np.sqrt(np.maximum(X['Kilometer'], 0.1)) + np.random.randn(n_samples)*0.1)
     
     print("Testing improved regression models...")
-    
-    # Split data
     split_idx = int(0.8 * len(X))
     X_train, X_test = X[:split_idx], X[split_idx:]
     y_train, y_test = y[:split_idx], y[split_idx:]
     
-    # Compare models
     results = compare_models(X_train, y_train, X_test, y_test)
-    
-    # Find best model
     best_model = min(results.keys(), key=lambda k: results[k]['test_mse'])
     print(f"\nBest model: {best_model} (Test MSE: {results[best_model]['test_mse']:.4f})")
     
-    # Example of loading from CSV (uncomment when you have actual data)
-    # trained_models = {name: results[name]['model'] for name in results.keys()}
-    # csv_results = load_and_evaluate_from_csv('val.csv', trained_models)
+   

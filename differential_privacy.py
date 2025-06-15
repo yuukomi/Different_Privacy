@@ -4,8 +4,7 @@ from linear_models import LinearRegression, QuadraticRegression, InteractionRegr
 
 class NoiseGenerator:
     """Noise generation mechanisms for differential privacy"""
-    
-    # Minimum epsilon threshold to prevent division by zero or extremely large noise
+
     MIN_EPSILON = 1e-8
     
     @staticmethod
@@ -28,7 +27,6 @@ class NoiseGenerator:
     def laplace_noise(sensitivity, epsilon, size=1):
         """
         Generate Laplace noise for differential privacy
-        
         Parameters:
         -----------
         sensitivity : float
@@ -61,31 +59,6 @@ class NoiseGenerator:
     
     @staticmethod
     def gaussian_noise(sensitivity, epsilon, delta=1e-5, size=1):
-        """
-        Generate Gaussian noise for differential privacy
-        Note: Only valid for epsilon < 1
-        
-        Parameters:
-        -----------
-        sensitivity : float
-            Global sensitivity of the function (must be > 0)
-        epsilon : float
-            Privacy parameter (must be > 0 and < 1)
-        delta : float
-            Privacy parameter for (ε,δ)-DP (must be > 0)
-        size : int or tuple
-            Shape of noise to generate
-            
-        Returns:
-        --------
-        numpy.ndarray
-            Gaussian noise
-            
-        Raises:
-        --------
-        ValueError
-            If epsilon <= 0, epsilon >= 1, sensitivity <= 0, or delta <= 0
-        """
         NoiseGenerator._validate_epsilon(epsilon)
         NoiseGenerator._validate_sensitivity(sensitivity)
         
@@ -144,19 +117,7 @@ class PrivacyAccountant:
         return self.total_epsilon, self.total_delta
     
     def advanced_composition(self, k=None):
-        """
-        Advanced composition theorem for better bounds
         
-        Parameters:
-        -----------
-        k : int
-            Number of mechanisms (if None, use actual count)
-            
-        Returns:
-        --------
-        tuple
-            (epsilon, delta) under advanced composition
-        """
         if k is None:
             k = len(self.privacy_spent)
         
@@ -170,8 +131,6 @@ class PrivacyAccountant:
         if avg_epsilon <= 0:
             return 0.0, self.total_delta
         
-        # Advanced composition: ε' = √(2k ln(1/δ')) * ε + k * ε * (e^ε - 1)
-        # Simplified version for small epsilon
         delta_prime = max(avg_delta, 1e-10)  # Ensure delta_prime > 0
         
         try:
@@ -180,7 +139,6 @@ class PrivacyAccountant:
             exp_term = k * avg_epsilon * (np.exp(avg_epsilon) - 1)
             epsilon_prime = sqrt_term + exp_term
         except (ValueError, OverflowError):
-            # Fallback to basic composition if advanced fails
             epsilon_prime = self.total_epsilon
         
         return epsilon_prime, self.total_delta
@@ -243,10 +201,6 @@ class PrivacyPreservingRegression:
         self.model = models[model_type]
     
     def _calculate_sensitivity(self, X, y, data_bounds=None):
-        """
-        Calculate sensitivity for regression coefficients
-        Simplified calculation - in practice this requires careful analysis
-        """
         if data_bounds is None:
             # Estimate bounds from data
             x_max = np.max(np.abs(X), axis=0)
@@ -274,27 +228,6 @@ class PrivacyPreservingRegression:
         return sensitivity
     
     def fit_with_user_level_dp(self, X, y, epsilon, noise_type="laplace", data_bounds=None):
-        """
-        User-level DP: Add noise to data before training
-        
-        Parameters:
-        -----------
-        X : array-like
-            Feature matrix
-        y : array-like  
-            Target vector
-        epsilon : float
-            Privacy parameter (must be > 0)
-        noise_type : str
-            'laplace' or 'gaussian'
-        data_bounds : dict
-            Bounds on data values for sensitivity calculation
-            
-        Raises:
-        --------
-        ValueError
-            If epsilon <= 0 or other invalid parameters
-        """
         # Validate epsilon early
         if epsilon <= 0:
             raise ValueError(f"Epsilon must be positive, got {epsilon}")
@@ -354,28 +287,6 @@ class PrivacyPreservingRegression:
         return self
     
     def predict_with_server_level_dp(self, X, epsilon, noise_type="laplace"):
-        """
-        Server-level DP: Add noise to predictions
-        
-        Parameters:
-        -----------
-        X : array-like
-            Feature matrix for prediction
-        epsilon : float
-            Privacy parameter for this query (must be > 0)
-        noise_type : str
-            'laplace' or 'gaussian'
-            
-        Returns:
-        --------
-        numpy.ndarray
-            Noisy predictions
-            
-        Raises:
-        --------
-        ValueError
-            If model not fitted or epsilon <= 0
-        """
         if self.model.coefficients is None:
             raise ValueError("Model must be fitted first")
         
@@ -440,7 +351,6 @@ class PrivacyPreservingRegression:
         if self.privacy_approach == "user_level":
             return self.fit_with_user_level_dp(X, y, epsilon, **kwargs)
         else:
-            # For server-level, train normally first
             try:
                 self.model.fit(X, y)
             except Exception as e:
@@ -462,27 +372,6 @@ class PrivacyPreservingRegression:
 def analyze_privacy_utility_tradeoff(X_train, y_train, X_test, y_test, 
                                    epsilon_values, model_type="linear",
                                    privacy_approach="user_level"):
-    """
-    Analyze privacy-utility tradeoff across different epsilon values
-    
-    Parameters:
-    -----------
-    X_train, y_train : array-like
-        Training data
-    X_test, y_test : array-like  
-        Test data
-    epsilon_values : list
-        List of epsilon values to test (must all be > 0)
-    model_type : str
-        Type of regression model
-    privacy_approach : str
-        'user_level' or 'server_level'
-        
-    Returns:
-    --------
-    dict
-        Results for each epsilon value
-    """
     results = {}
     
     # Validate epsilon values
@@ -579,7 +468,6 @@ if __name__ == "__main__":
     print("Testing Differential Privacy for Regression")
     print("=" * 50)
     
-    # Test epsilon values (removed 0 and very small values)
     epsilon_values = [0.1, 0.5, 1.0, 5.0, 10.0, 15.0]
     
     try:
@@ -596,8 +484,6 @@ if __name__ == "__main__":
             X_train, y_train, X_test, y_test,
             epsilon_values, "linear", "server_level"
         )
-        
-        # Summary
         print("\n\nSUMMARY")
         print("=" * 50)
         print("User-level DP Results:")

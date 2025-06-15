@@ -182,41 +182,39 @@ def plot_privacy_comparison(results):
     
     df = pd.DataFrame(plot_data)
     
-    # Set a modern style with better colors
+ 
     plt.style.use('seaborn-v0_8-whitegrid')
     
-    # Define a better color palette
+
     colors = {
-        'linear': '#3498db',      # Blue
-        'quadratic': '#e74c3c',   # Red
-        'interaction': '#2ecc71', # Green
-        'hybrid': '#f39c12'       # Orange
+        'linear': '#3498db',      
+        'quadratic': '#e74c3c',   
+        'interaction': '#2ecc71',
+        'hybrid': '#f39c12'      
     }
     
-    # Create figure with improved size and resolution
+
     fig = plt.figure(figsize=(16, 12), dpi=300)
-    
-    # Subplot 1: RMSE vs Epsilon (Privacy-Utility Tradeoff)
+
     ax1 = plt.subplot(2, 2, 1)
     model_types = df['model_type'].unique()
     
-    # Offset values for label positioning to avoid overlap
+   
     offsets = {'linear': (-15, 10), 'quadratic': (15, 10), 
                'interaction': (-15, -15), 'hybrid': (15, -15)}
     
     for model_type in model_types:
         model_data = df[df['model_type'] == model_type]
-        
-        # Filter out baseline (epsilon='inf')
+
         model_data_numeric = model_data[model_data['epsilon'] != 'inf']
         if len(model_data_numeric) > 0:
             line = ax1.plot(model_data_numeric['epsilon'], model_data_numeric['rmse'], 
                     'o-', color=colors[model_type], linewidth=2.5, 
                     markersize=8, label=model_type.capitalize())
             
-            # Add value labels at each point with offset based on model type
+         
             for x, y in zip(model_data_numeric['epsilon'], model_data_numeric['rmse']):
-                if y > 1e9:  # Nếu giá trị lớn, hiển thị theo định dạng khoa học
+                if y > 1e9: 
                     ax1.annotate(f'{y:.1e}', 
                                 (x, y), 
                                 textcoords="offset points",
@@ -235,7 +233,7 @@ def plot_privacy_comparison(results):
                                 bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.7,
                                          edgecolor=colors[model_type]))
         
-        # Add baseline point
+    
         baseline_data = model_data[model_data['epsilon'] == 'inf']
         if len(baseline_data) > 0:
             ax1.axhline(y=baseline_data['rmse'].iloc[0], color=colors[model_type], 
@@ -250,25 +248,24 @@ def plot_privacy_comparison(results):
     ax1.set_xscale('log')
     ax1.tick_params(axis='both', which='major', labelsize=10)
     
-    # Subplot 2: Bar chart of RMSE by privacy category with enhanced visuals
     ax2 = plt.subplot(2, 2, 2)
     category_data = df.groupby(['category', 'model_type'])['rmse'].mean().unstack()
     
-    # Ensure consistent order of categories
+    
     if 'High Privacy' in category_data.index and 'Medium Privacy' in category_data.index and 'No Privacy' in category_data.index:
         category_data = category_data.reindex(['High Privacy', 'Medium Privacy', 'No Privacy'])
     
-    # Create custom color map for the bar chart
+   
     color_list = [colors[model] for model in category_data.columns]
     
     bars = category_data.plot(kind='bar', ax=ax2, color=color_list, width=0.7, edgecolor='black', linewidth=0.5)
     
-    # Add value labels vertically on top of each bar (similar to biểu đồ 3)
+    
     for i, container in enumerate(bars.containers):
         for j, bar in enumerate(container):
             height = bar.get_height()
-            if height is not None:  # Kiểm tra nếu thanh có giá trị
-                if height > 1e9:  # Nếu giá trị lớn, hiển thị theo định dạng khoa học
+            if height is not None:  
+                if height > 1e9:
                     ax2.text(bar.get_x() + bar.get_width()/2., height + 0.02*height,
                            f'{height:.1e}',
                            ha='center', va='bottom', rotation=90, fontsize=8, fontweight='bold',
@@ -292,12 +289,12 @@ def plot_privacy_comparison(results):
     ax2.legend(title='Model Type', title_fontsize=11, fontsize=10, frameon=True, 
               facecolor='white', edgecolor='gray')
     
-    # Subplot 3: Privacy cost visualization with enhanced design
+   
     ax3 = plt.subplot(2, 2, 3)
     privacy_levels = df[df['epsilon'] != 'inf']['epsilon'].unique()
     privacy_levels = sorted([float(x) for x in privacy_levels])
     
-    bar_width = 0.18  # Adjusted width for better appearance
+    bar_width = 0.18  
     
     for i, model_type in enumerate(model_types):
         model_rmse = []
@@ -312,11 +309,11 @@ def plot_privacy_comparison(results):
                 width=bar_width, label=model_type.capitalize(), color=colors[model_type],
                 edgecolor='black', linewidth=0.5)
         
-        # Add value labels on top of each bar
+     
         for bar in bars:
             height = bar.get_height()
-            if height is not None:  # Kiểm tra nếu thanh có giá trị
-                if height > 1e9:  # Nếu giá trị lớn, hiển thị theo định dạng khoa học
+            if height is not None:  
+                if height > 1e9:  
                     ax3.text(bar.get_x() + bar.get_width()/2., height + 0.05*height,
                            f'{height:.1e}',
                            ha='center', va='bottom', rotation=90, fontsize=8, fontweight='bold',
@@ -337,11 +334,11 @@ def plot_privacy_comparison(results):
     ax3.tick_params(axis='both', which='major', labelsize=10)
     ax3.legend(fontsize=10, frameon=True, facecolor='white', edgecolor='gray')
     
-    # Subplot 4: Privacy categories distribution with better pie chart
+   
     ax4 = plt.subplot(2, 2, 4)
     category_counts = df['category'].value_counts()
     
-    # Define better colors for pie chart
+
     pie_colors = ['#3498db', '#f39c12', '#2ecc71']
     
     wedges, texts, autotexts = ax4.pie(
@@ -353,13 +350,13 @@ def plot_privacy_comparison(results):
         wedgeprops={'edgecolor': 'white', 'linewidth': 1.5}
     )
     
-    # Customize pie chart text
+ 
     for autotext in autotexts:
         autotext.set_fontsize(10)
         autotext.set_fontweight('bold')
         autotext.set_color('white')
     
-    # Add a legend instead of labels on the pie
+   
     ax4.legend(
         wedges, 
         [f"{cat} ({count})" for cat, count in zip(category_counts.index, category_counts.values)],
@@ -371,11 +368,11 @@ def plot_privacy_comparison(results):
     
     ax4.set_title('Distribution of Privacy Categories', fontsize=14, fontweight='bold')
     
-    # Improve overall layout
+ 
     plt.tight_layout()
     plt.subplots_adjust(wspace=0.3, hspace=0.3)
     
-    # Save with higher quality
+   
     plt.savefig('comprehensive_privacy_analysis.png', dpi=300, bbox_inches='tight')
     plt.close()
     
@@ -383,7 +380,6 @@ def plot_privacy_comparison(results):
 
 def save_detailed_results(results, filename='detailed_privacy_results.csv'):
     """Save detailed results to CSV"""
-    # Convert results to list of dictionaries
     results_list = []
     for model_key, metrics in results.items():
         results_list.append({
@@ -420,7 +416,7 @@ def print_summary(results):
         model_results = {k: v for k, v in results.items() 
                         if v['model_type'] == model_type}
         
-        # Sort by epsilon
+      
         sorted_results = sorted(model_results.items(), 
                               key=lambda x: float('inf') if x[1]['epsilon'] == 'inf' 
                                           else float(x[1]['epsilon']))
@@ -439,29 +435,24 @@ if __name__ == "__main__":
     print(f"Training samples: {len(X_train)}")
     print(f"Test samples: {len(X_test)}")
     
-    # Choose analysis type
-    analysis_type = "focused"  # Change to "comprehensive" for full analysis
+   
+    analysis_type = "focused"  
     
     if analysis_type == "comprehensive":
-        # Run comprehensive analysis (all combinations)
+
         print("\nRunning comprehensive privacy analysis...")
         privacy_results = run_comprehensive_privacy_analysis(
             X_train, y_train, X_test, y_test
         )
     else:
-        # Run focused analysis (user-level DP only)
         print("\nRunning focused privacy analysis...")
         privacy_results = run_focused_privacy_analysis(
             X_train, y_train, X_test, y_test
         )
     
-    # Create visualizations
+  
     plot_privacy_comparison(privacy_results)
-    
-    # Save detailed results
     save_detailed_results(privacy_results)
-    
-    # Print summary
     print_summary(privacy_results)
     
     print(f"\nExperiment completed!")

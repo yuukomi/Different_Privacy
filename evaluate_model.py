@@ -5,8 +5,6 @@ from Different_Privacy.data_preprocessing import preprocess_data
 
 def evaluate_from_csv(csv_path, model_type="Basic Linear", show_data=True):
     """
-    Evaluate model accuracy on data from a CSV file
-    
     Parameters:
     -----------
     csv_path : str
@@ -59,8 +57,6 @@ def evaluate_from_csv(csv_path, model_type="Basic Linear", show_data=True):
             print(f"Feature matrix shape: {X.shape}")
             print(f"Target vector shape: {y.shape}")
             print(f"Feature names: {X.columns.tolist()}")
-        
-        # Import models and evaluation functions
         from linear_models import LinearRegression, QuadraticRegression, InteractionRegression, HybridRegression, mean_squared_error, mean_absolute_error
         
         models = {
@@ -84,19 +80,18 @@ def evaluate_from_csv(csv_path, model_type="Basic Linear", show_data=True):
         
         model.fit(X, y)
         
-        # Make predictions
+  
         y_pred = model.predict(X)
-        
-        # Calculate metrics
+
         mse = mean_squared_error(y, y_pred)
         rmse = np.sqrt(mse)
         mae = mean_absolute_error(y, y_pred)
         
-        # Calculate additional metrics
+
         r2 = 1 - (np.sum((y - y_pred) ** 2) / np.sum((y - np.mean(y)) ** 2))
         mape = np.mean(np.abs((y - y_pred) / (y + 1e-8))) * 100
         
-        # Print results
+
         print(f"\n" + "="*50)
         print("MODEL PERFORMANCE METRICS")
         print("="*50)
@@ -111,7 +106,7 @@ def evaluate_from_csv(csv_path, model_type="Basic Linear", show_data=True):
             print("PREDICTION EXAMPLES")
             print("="*50)
             
-            # Show first 10 predictions
+       
             n_examples = min(10, len(y))
             comparison = pd.DataFrame({
                 'Actual': y.iloc[:n_examples].values,
@@ -122,7 +117,7 @@ def evaluate_from_csv(csv_path, model_type="Basic Linear", show_data=True):
             
             print(comparison.round(2))
             
-            # Show prediction distribution
+        
             print(f"\n" + "="*50)
             print("PREDICTION DISTRIBUTION")
             print("="*50)
@@ -157,7 +152,6 @@ def evaluate_from_csv(csv_path, model_type="Basic Linear", show_data=True):
         return None
 
 if __name__ == "__main__":
-    # Command line interface
     if len(sys.argv) < 2:
         print("Usage: python evaluate_model.py <csv_path> [model_type] [show_data]")
         print("Example: python evaluate_model.py data.csv 'Hybrid' True")
